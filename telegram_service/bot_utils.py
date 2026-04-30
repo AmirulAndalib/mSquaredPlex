@@ -3,13 +3,14 @@ import os
 import imdb
 from imdb import Cinemagoer
 import requests
+import tmdbsimple as tmdb_api
 
 from utils import check_one_against_torrents_by_imdb, get_movie_details, get_my_imdb_users, \
     Torrent, Watchlist, get_from_watchlist_by_user_and_imdb, get_my_movie_by_imdb, \
     get_from_watchlist_by_user_telegram_id_and_imdb, insert_many, _title_header
 from utils import update_many, connect_plex
 from utils import deconvert_imdb_id, check_one_against_torrents_by_torr_id
-from utils import setup_logger
+from utils import setup_logger, TMDB_API_KEY
 
 NO_POSTER_PATH = os.getenv('NO_POSTER_PATH')
 
@@ -211,13 +212,45 @@ def get_movie_from_all_databases(imdb_id, telegram_id):
         return pkg
 
 
+def _search_tmdb_fallback(query):
+    """Search TMDB as a fallback when Cinemagoer fails. Returns results in Cinemagoer format."""
+    try:
+        tmdb_api.API_KEY = TMDB_API_KEY
+        search = tmdb_api.Search()
+        search.movie(query=query)
+        results = []
+        for entry in search.results[:5]:
+            try:
+                movie = tmdb_api.Movies(entry['id'])
+                info = movie.info()
+                imdb_id_str = getattr(movie, 'imdb_id', None)
+                if not imdb_id_str:
+                    continue
+                numeric_id = deconvert_imdb_id(imdb_id_str)
+                results.append({
+                    'id': numeric_id,
+                    'title': entry.get('title', ''),
+                    'kind': 'movie',
+                })
+            except Exception as e:
+                logger.debug("TMDB fallback: failed to resolve TMDB id %s: %s", entry.get('id'), e)
+                continue
+        logger.info("TMDB fallback for '%s' returned %d results", query, len(results))
+        return results
+    except Exception as e:
+        logger.error("TMDB fallback search failed for '%s': %s", query, e)
+        return []
+
+
 def search_imdb_title(item, ia=None):
     if not ia:
         try:
             ia = Cinemagoer()
         except Exception as e:
-            logger.error(e)
-            return 'IMDB library error'
+            logger.error("Cinemagoer init failed: %s", e)
+            logger.info("Trying TMDB fallback for '%s' after Cinemagoer init failure", item)
+            fallback = _search_tmdb_fallback(item)
+            return fallback if fallback else 'IMDB library error'
     try:
         # TODO remove this ugly fix when library gets fixed
         tries = 5
@@ -227,16 +260,24 @@ def search_imdb_title(item, ia=None):
                 tries = tries - 1
             else:
                 break
+        if not movies:
+            logger.warning("Cinemagoer returned 0 results for '%s' after 5 retries", item)
         res = []
         for x in movies:
             if x.data['kind'] == 'movie':
                 x.data['id'] = x.movieID
                 res.append(x.data)
+        if movies and not res:
+            logger.info("Cinemagoer returned %d results for '%s' but none with kind='movie'", len(movies), item)
+        if not res:
+            logger.info("Trying TMDB fallback for '%s'", item)
+            res = _search_tmdb_fallback(item)
         return res
-        # return {x.data for x in movies}
     except Exception as e:
-        logger.error(e)
-        return 'IMDB library error'
+        logger.error("Cinemagoer search error for '%s': %s", item, e)
+        logger.info("Trying TMDB fallback for '%s' after Cinemagoer exception", item)
+        fallback = _search_tmdb_fallback(item)
+        return fallback if fallback else 'IMDB library error'
 
 
 def add_to_watchlist(imdb_id, user, status, excluded_torrents=None):

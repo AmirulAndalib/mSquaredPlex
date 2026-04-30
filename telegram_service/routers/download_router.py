@@ -195,6 +195,8 @@ async def handle_movie_query(message: Message, state: FSMContext):
     except Exception as e:
         logger.exception("Error during IMDB search for '%s': %s", title_text, e)
 
+    logger.debug("search_imdb_title('%s') returned: %s", title_text, movies)
+
     if not movies or isinstance(movies, str):
         await message.answer(
             "Couldn't find any matching movies. Try refining your title or paste an IMDB link like https://www.imdb.com/title/tt0133093/."
