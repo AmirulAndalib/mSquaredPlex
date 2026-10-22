@@ -6,9 +6,9 @@ requires-python = ">=3.12"
 dependencies = [
   "fastapi==0.115.0",
   "uvicorn[standard]==0.30.0",
-  "python-dotenv==1.0.1",
-  "requests==2.32.3",
-  "anyio==3.7.1",
+  "python-dotenv==1.2.2",
+  "requests==2.33.0",
+  "anyio==4.14.2",
   "SQLAlchemy==1.4.52",
   "psycopg2-binary==2.9.9",
   "PlexAPI==4.15.10",
